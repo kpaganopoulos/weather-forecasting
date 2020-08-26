@@ -1,0 +1,449 @@
+---
+title: "Predicitive Analytics in Weather Forecasting using time series models"
+author: "Konstantinos Paganopoulos"
+subtitle: Business Analytics Report
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+### Data Preparation
+
+First we load the necessary libraries.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE)
+library(forecast)
+library(tseries)
+library(ggplot2)
+library(dplyr)
+```
+
+We have a dataset, which includes mean montly temperatures for Aomori City of Japan, from January 2001 to December 2018. Each observation includes three values: year, month, and mean temperature in that particular month.
+
+Then, we load and split the data set into train and test set.
+
+```{r}
+# read csv file
+data <- read.csv(file = "data.csv", header = TRUE, stringsAsFactors = FALSE)
+
+# convert column date of data set to type date
+#data$Time <- as.Date(data$Time)
+
+# convert sales into a time series object
+mean_temp <- ts(data[, 3], frequency = 12, start = c(1, 1)) # 1st week 1st day
+
+# split data set into train and test set
+mean_temp_train <- subset(mean_temp, end = 204,)
+mean_temp_test <- subset(mean_temp, start = 205,) # last 1 year
+```
+
+We see our data.
+
+```{r}
+head(data)
+```
+
+### EDA
+
+Let's now do a simple Exploratory Data Analysis that is necessary for our case and see some basic statistics (e.g. min, max, mean) of our data.
+
+```{r}
+summary(data)
+```
+
+Let's find out the average temperature for each of the 12 months based on weather data from 2001 to 2018.
+
+```{r}
+data_month <- data %>% 
+  select(month,mean_temp) %>%
+  group_by(month) %>%
+  summarize(monthly_mean = round(mean(mean_temp),1))
+data_month
+```
+
+We depict the average temperature per month in the following diagram.
+
+```{r}
+ggplot(data_month, aes(x = month, y = monthly_mean)) + geom_smooth(colour = "firebrick3", outlier.shape = NA, se = FALSE) + geom_jitter(width = 0.2, alpha = 0.5, color = "coral3") + theme_classic() + scale_x_continuous(breaks = c(1,2,3,4,5,6,7,8,9,10,11,12)) + labs(x = "Month (1-12)", y = "Temperature (°C)") + ggtitle("Mean Monthly Temperature")
+```
+
+We can see that January is the coldest month, with an average temperature below 0 and August is the hottest month with a mean temperature slightly below 25.
+
+Let's now examine the mean temperature per year, and see if there is an upward trend due to climat change.
+
+```{r}
+data_year <- data %>% 
+  select(year, mean_temp) %>%
+  group_by(year) %>%
+  summarize(annual_mean = mean(mean_temp))
+data_year
+```
+
+```{r}
+ggplot(data_year) + geom_point(aes(x = year, y = annual_mean), color = 'coral3', alpha = 0.5) + geom_smooth(mapping = aes(x = year, y = annual_mean), color = 'firebrick3', se = FALSE) + labs(x = "Year (2001-2018)", y = "Temperature (°C)", title = "Mean Annual Temperature") + theme_classic() + scale_x_continuous(breaks = c(2001,2002,2003,2004,2005,2006,2007,2008,2009,2010,2011,2012,2013,2014,2015,2016,2017,2018)) + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Even if we have data for only 18 years, we can observe an increase in the average temperature by 1.1 degree Celsius.
+
+Hence, even if we observed different trends based on seasonality (e.g. summer, winter), the average annual temperature is following an upward trend during the past 18 years in Aomori City of Japan.
+
+### ARIMA
+
+We visually inspect the time series.
+
+```{r}
+autoplot(mean_temp_train, xlab = "Year (2001-2017)", ylab = "Temperature (°C)") + theme_minimal() +
+ggtitle("Aomori city Mean Monthly Temperature - Time series plot") + scale_x_continuous(breaks = c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17))
+```
+
+```{r}
+ggtsdisplay(mean_temp_train, xlab = "Year (2001-2017)", theme = theme_minimal())
+```
+
+Due to the seasonality in time series, it is non-stationary. We can get rid of seasonality by taking first-order difference. We plot the time series after the difference, and observe that there is no seasonality and appears to be stationary. We run ADF, PP and KPSS tests to formally test the stationarity of time series after the first-order difference, and all suggest that the time series is stationary.
+
+```{r}
+# stationary test
+adf.test(mean_temp_train)
+```
+
+```{r}
+pp.test(mean_temp_train)
+```
+
+```{r}
+kpss.test(mean_temp_train)
+```
+
+The two automatic functions, ndiffs() and nsdiffs() tell us how many first-order differences, and how many seasonal differences, respectively, we need to take to make the time series stationary. We use those functions below:
+
+```{r}
+ndiffs(mean_temp_train)
+```
+
+```{r}
+nsdiffs(mean_temp_train)
+```
+
+We need to differentiate for seasonality one time.
+
+```{r}
+### stationarize time series
+# take first order difference
+mean_temp_train.diff1 <- diff(mean_temp_train, differences = 1, lag = 12)
+```
+
+Check again the tests for stationarity:
+
+```{r}
+# stationary test
+adf.test(mean_temp_train.diff1)
+```
+
+```{r}
+pp.test(mean_temp_train.diff1)
+```
+
+```{r}
+kpss.test(mean_temp_train.diff1)
+```
+
+Check again the two automatic functions for stationarity:
+
+```{r}
+ndiffs(mean_temp_train.diff1)
+```
+
+```{r}
+nsdiffs(mean_temp_train.diff1)
+```
+
+We now visually inspect the differentiated time series.
+
+```{r}
+autoplot(mean_temp_train.diff1, xlab = "Year (2001-2017)", ylab = "Temperature (°C)") + theme_minimal() + ggtitle("Aomori city Mean Monthly Temperature - Time series plot") + scale_x_continuous(breaks = c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17))
+```
+
+```{r}
+ggtsdisplay(mean_temp_train.diff1, xlab = "Year (2001-2017)", theme = theme_minimal())
+```
+
+Looks stationary.
+
+Once we have a stationary time series, the next step is to determine the optimal orders of MA and AR components. We first plot the ACF and PACF of the time series.
+
+```{r}
+# acf plot
+ggAcf(mean_temp_train.diff1) + theme_minimal() + ggtitle("Aomori city Mean Monthly Temperature - ACF plot")
+```
+
+```{r}
+# pacf plot
+ggPacf(mean_temp_train.diff1) + theme_minimal() + ggtitle("Aomori city Mean Monthly Temperature - PACF plot")
+```
+
+Next we use $auto.arima()$ to search for the best ARIMA models. 
+
+The default procedure uses some approximations to speed up the search. These approximations can be avoided with the argument approximation = FALSE. It is possible that the minimum AIC model will not be found due to these approximations, or because of the stepwise procedure. A much larger set of models will be searched if the argument stepwise = FALSE is used. We also use d = 0 and D = 1 since we had no first-differencing but only seasonal-differencing.
+
+```{r}
+auto.arima(mean_temp_train, trace = TRUE, ic = 'aic', approximation = FALSE, stepwise = FALSE, d=0, D=1)
+# Best model: ARIMA(1,0,0)(0,1,1)(AIC=622.9)
+# Second best: ARIMA(0,0,2)(0,1,1)(AIC=623.3)
+# Third best: ARIMA(2,0,0)(0,1,1)(AIC=624.4)
+```
+
+Based on the output of $auto.arima()$, a couple of models have similar AICs. Now suppose that we choose the best model, in other words the one with the lowest AIC, namely ARIMA(1,0,0)(0,1,1)[12] with AIC=622.9, as the candidate model that we would like to evaluate further.
+
+```{r}
+mean_temp.m1 <- Arima(mean_temp_train, order = c(1, 0, 0), seasonal = list(order = c(0, 1, 1), period = 12))
+```
+
+Now we evaluate the in-sample performance/fit of the model with $accuracy()$ function, which summarizes various measures of fitting errors. 
+
+A couple of functions are proved to be useful for us to evaluate the in-sample performance/fit of the model. One is accuracy() function, which summarizes various measures of fitting errors. In the post-estimation analysis, we would also like to check out the residual plots, including time series, ACFs and etc, to make sure that there is no warning signal. In particular, residuals shall have a zero mean, constant variance, and distributed symmetrically around mean zero. ACF of any lag greater 0 is expected to be statistically insignificant.
+
+```{r}
+# in-sample one-step forecasts best model
+accuracy(mean_temp.m1)
+```
+
+Now we proceed with the residual analysis of our best model.
+
+```{r}
+# residual analysis best model
+autoplot(mean_temp.m1$residuals, xlab = "Year (2001-2017)", ylab = "Temperature (°C)") + theme_minimal() + ggtitle("Aomori city Mean Monthly Temperature - Residuals model 1 plot") + scale_x_continuous(breaks = c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17))
+```
+
+```{r}
+ggAcf(mean_temp.m1$residuals) + theme_minimal() + 
+ggtitle("Aomori city Mean Monthly Temperature - ACF residualts plot model 1")
+```
+
+```{r}
+checkresiduals(mean_temp.m1, xlab = "Year (2001-2017)", theme = theme_minimal())
+```
+
+Now we continue with the forecasting part for our candidate model:
+
+```{r}
+#Forecasting part best model
+mean_temp.f1 <- forecast(mean_temp.m1, h = 12)
+autoplot(mean_temp.f1, xlab = "Year (2001-2018)", ylab = "Temperature (°C)") + theme_minimal() + scale_x_continuous(breaks = c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18))
+```
+
+Now we need to test how our model performs for test set. Earlier observations are used for training, and more recent observations are used for testing. Suppose we use the first 204 months of data for training and the last 12 for test. Based on auto.arima(), we choose the candidate model with the lowest AIC.
+
+```{r}
+### model evaluation
+# Apply fitted model to later data
+# Accuracy test for best model
+accuracy.m1 <- accuracy(forecast(mean_temp.m1, h = 12), mean_temp_test)
+accuracy.m1
+```
+
+Now we train our best model on the whole date set as follows:
+
+```{r}
+# Training on both train and test set
+mean_temp.f.both <- Arima(mean_temp, order = c(1, 0, 0), seasonal = list(order = c(0, 1, 1), period = 12))
+```
+
+Lastly, we forecast average monthly temperature for the next year.
+
+```{r}
+# Forecast for next 1 year
+mean_temp.f.final <- forecast(mean_temp.f.both, h = 12)
+mean_temp.f.final
+```
+
+We present our forecast through ARIMA(1,0,0)(0,1,1) model for each of the next 14 days.
+
+```{r}
+forecast_data1 <- as.data.frame(mean_temp.f.final)
+next2weeks <- data.frame(month_2019 = seq(1, 12))
+final_forecast_California2_arima <- cbind(next2weeks, forecast_data1$`Point Forecast`)
+final_forecast_California2_arima
+```
+
+### Holt-Winters 
+
+Now we will use another model to forecast temperature. Our goal is to pick the model with the most accurate predictions.
+
+We will forecast the average montly temperature demand for the next year using Holt-Winters model.
+
+For time series analysis, the first step is always to visually inspect the time series. In this regard, the stl() function is quite useful. It decomposes the original time series into trend, seasonal factors, and random error terms. The relative importance of different components are indicated by the grey bars in the plots.
+
+```{r}
+mean_temp_train %>% stl(s.window = "period") %>%
+autoplot(xlab = "Year (2001-2017)", ylab = "Temperature (°C)") + theme_minimal() + 
+ggtitle("Aomori city Mean Monthly Temperature - Range bar plot") + scale_x_continuous(breaks = c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17))
+```
+
+For this data set, the grey bar of the trend panel is significantly larger than that on the orginal time series panel, which indicates that the contribution of the trend component to the variation in the original time series is marginal.
+
+The grey bar of the seasonal panel is very small, and smaller than the grey bar of random error term, which indicates that the contribution of seasonal factors to the variation in the original time series is huge. In other words, it indicates that there is high seasonality in the data.
+
+With ets(), initial states and smoothing parameters are jointly estimated by maximizing the likelihood function. We need to specify the model in ets() using three letters. The way to approach this is: (1) check out time series plot, and see if there is any trend and seasonality; (2) run ets() with model = “ZZZ”, and see whether the best model is consistent with your expectation; (3) if they are consistent, it gives us confidence that our model specification is correct; otherwise try to figure out why there is a discrepancy.
+
+We now use ets function as previously indicated to find our best model:
+
+```{r}
+# using ets
+mean_temp.ets2 <- ets(mean_temp_train, model = "ZZZ")
+mean_temp.ets2
+```
+
+Our best model is the ETS(A,A,A).
+
+```{r}
+# using ets
+mean_temp.ets <- ets(mean_temp_train, model = "AAA", ic = 'aic')
+mean_temp.ets
+```
+
+After estimation, we can use accuracy() function to determine in-sample fit and forecast() function to generate forecast. 
+
+Similarly with ARIMA model, we use AIC to determine our best model in terms of best in-sample performance.
+
+```{r}
+# in-sample one-step forecast
+accuracy(mean_temp.ets)
+```
+
+We present the in-sample forecast part for the ets model as follows:
+
+```{r}
+# best model
+mean_temp.ets.f <- forecast(mean_temp.ets, h = 12)
+mean_temp.ets.f
+```
+
+After the forecast, we continue with the in and out of sample accuracy of the two ets models.
+
+```{r}
+# Out of sample accuracy
+# best model
+accuracy.ets <- accuracy(mean_temp.ets.f, mean_temp_test)
+accuracy.ets
+```
+
+We now train our best model - ETS(A,N,A) on the whole data set as indicated below:
+
+```{r}
+# final model
+mean_temp.ets <- ets(mean_temp, model = "AAA", ic = 'aic')
+mean_temp.ets
+```
+
+We now present the out-of-sample forecast for the next 14 days (2 weeks) as seen below:
+
+```{r}
+mean_temp.ets.f <- forecast(mean_temp.ets, h = 12)
+mean_temp.ets.f
+```
+
+We present our forecast for each of the next 12 months.
+
+```{r}
+forecast_data2 <- as.data.frame(mean_temp.ets.f)
+next2weeks <- data.frame(month_2019 = seq(1, 12))
+final_forecast_California2_ets <- cbind(next2weeks, forecast_data2$`Point Forecast`)
+final_forecast_California2_ets
+```
+
+### Comparison
+
+Now we will compare the two best models for Monthly temperature forecast around Aomori City.
+
+We plot time series data for train and test set and also the forecasts from our two models as indicated below:
+
+```{r}
+colours <- c("blue", "black", "deepskyblue4")
+autoplot(mean_temp.f.final, xlab = "Year (2001-2019)", ylab = "Temperature (°C)") + 
+  autolayer(mean_temp_train, series = "Train set") +
+  autolayer(mean_temp_test, series = "Validation set") +
+  autolayer(mean_temp.f.final, series = "1 Year Forecast") +
+  guides(colour = guide_legend(title = "Time Series Data")) +
+  scale_colour_manual(values = colours) + theme_minimal() + scale_x_continuous(breaks = c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19))
+```
+
+```{r}
+autoplot(mean_temp.ets.f, xlab = "Year (2001-2019)", ylab = "Temperature (°C)") + 
+  autolayer(mean_temp_train, series = "Train set") +
+  autolayer(mean_temp_test, series = "Validation set") +
+  autolayer(mean_temp.ets.f, series = "1 Year Forecast") +
+  guides(colour = guide_legend(title = "Time Series Data")) +
+  scale_colour_manual(values = colours) + theme_minimal() + scale_x_continuous(breaks = c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19))
+```
+
+In order to decide which of the two models ARIMA(0,0,2)(0,1,1) or ETS(A,N,A) to choose, we will check their RMSE in the test set.
+
+```{r}
+# best arima model
+# ARIMA(1,0,0)(0,1,1)
+accuracy.m1
+```
+
+```{r}
+# best ets model
+# ETS(A,A,A) 
+accuracy.ets
+```
+
+We can observe that ETS(A,a,A) has a better (lower) RMSE (0.8525217 vs 0.895960) respectively.
+
+Therefore, we choose the ETS(A,A,A) for our weather forecasting method.
+
+Now, let's load the csv file with the actual mean monthly temperatures for next year (2019) and see how accurate our forecasts were.
+
+```{r}
+data2 <- read.csv(file = "2019.csv", header = TRUE, stringsAsFactors = FALSE, fileEncoding="UTF-8-BOM")
+head(data2)
+```
+
+Let's now compare, the ARIMA and the ETS results with the actual data and also calculate their absolute difference between the mean montly temperatures of 2019. 
+
+```{r}
+actual_data <- data2$mean_temp
+arima_forecast <- round(forecast_data1$`Point Forecast`,1)
+ets_forecast <- round(forecast_data2$`Point Forecast`,1)
+arima_error <- abs(actual_data-arima_forecast)
+ets_error <- abs(actual_data-ets_forecast)
+month <- seq(1,12)
+```
+
+```{r}
+final_forecast <- cbind(month, arima_forecast, ets_forecast, actual_data, arima_error, ets_error)
+final_forecast
+```
+
+Clearly, ETS model has managed to forecast the mean temperature for every month of next year very accurately.
+
+Let's now see how accurate our two models were by examining the absolute difference of their predicted values with the actual data as follows:
+
+```{r}
+round(mean(arima_error),2)
+```
+
+```{r}
+round(mean(ets_error),2)
+```
+
+Below we can plot the forecasted values from our two models as well as the actual temperatures.
+
+```{r}
+ggplot(data = data2, aes(x = month)) + geom_smooth(aes(y = actual_data, colour = "Actual data"), se = FALSE) + geom_smooth(aes(y = ets_forecast, colour = "Ets forecast"), se = FALSE) + geom_smooth(aes(y = arima_forecast, colour = "Arima forecast"), se = FALSE) + scale_colour_manual(breaks = c("Actual data", "Ets forecast", "Arima forecast"), values = c("black", "darkorange", "firebrick")) + theme_classic() + scale_x_continuous(breaks = c(1,2,3,4,5,6,7,8,9,10,11,12)) + labs(x = "Month (1-12)", y = "Temperature (°C)", colour = "Time Series Data") + ggtitle("Mean Monthly Temperature - 2019")
+```
+
+Thus we can see that the Holt-Winters model performs much better on the test set. Note that the final forecasted mean temperatures differ on average only by 0.67 from the actual ones, which is a very accurate result.
+
+Similarly, we can use our analysis to forecast the mean monthly temperature of 2020 and why not predicting the values for other future years too.
+
+In this analysis, we focused on predicting the average montly temperature only for one year later, so as to be more accurate. We could also examine future years, but for that case we would may have to search for data before 2001, which was a limitation for that report. 
+
+Nevertheless, in meteorology and weather forecasting, the ability to forecast weather drops significantly as the future time interval is increasing. The so-called "Ensembles" try to forecast long-term weather paramaters, but one should take into account that the predictability is much worse as time goes by.
+
+Thanks for the data provided by Kaggle and the Japan Meteorological Agency.
